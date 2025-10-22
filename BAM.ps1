@@ -3,83 +3,81 @@ $ErrorActionPreference = "SilentlyContinue"
 function Get-Signature {
     param ([string]$FilePath)
 
-    if (-not (Test-Path -PathType Leaf -Path $FilePath)) { return "File Was Not Found" }
+    if (-not (Test-Path $FilePath -PathType Leaf)) {
+        return "File Was Not Found"
+    }
 
-    $Status = (Get-AuthenticodeSignature -FilePath $FilePath -ErrorAction SilentlyContinue).Status
-    switch ($Status) {
+    $sigStatus = (Get-AuthenticodeSignature -FilePath $FilePath).Status
+    switch ($sigStatus) {
         "Valid" { return "Valid Signature" }
         "NotSigned" { return "Invalid Signature (NotSigned)" }
         default { return "Invalid Signature" }
     }
 }
 
+function Convert-FileTimeToUTC {
+    param ([byte[]]$bytes)
+    if ($bytes.Length -ne 24) { return $null }
+    $hex = [System.BitConverter]::ToString($bytes[7..0]) -replace "-",""
+    return [DateTime]::FromFileTimeUtc([Convert]::ToInt64($hex,16))
+}
+
+$rpath = @(
+    "HKLM:\SYSTEM\CurrentControlSet\Services\bam\",
+    "HKLM:\SYSTEM\CurrentControlSet\Services\bam\state\"
+)
+
 try {
-    $Users = @("bam", "bam\State") | ForEach-Object {
-        Get-ChildItem -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$_\UserSettings\" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty PSChildName
-    } | Sort-Object -Unique
-}
-catch {
+    $Users = foreach ($ii in @("bam","bam\State")) {
+        Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services\$ii\UserSettings" | Select-Object -ExpandProperty PSChildName
+    }
+} catch {
     Write-Warning "Error Parsing BAM Key"
-    exit 1
+    Exit
 }
 
-$rpath = @("HKLM:\SYSTEM\CurrentControlSet\Services\bam\", "HKLM:\SYSTEM\CurrentControlSet\Services\bam\state\")
-
-$Bam = @()
-foreach ($Sid in $Users) {
+$Bam = foreach ($Sid in $Users) {
     foreach ($rp in $rpath) {
-        $KeyPath = "$rp\UserSettings\$Sid"
-        $Props = Get-ItemProperty -Path $KeyPath -ErrorAction SilentlyContinue
-        
-        if ($Props) {
-            $BamItems = $Props.PSObject.Properties.Name
-            
-            foreach ($Item in $BamItems) {
-                $KeyValue = $Props.$Item
-                
-                if ($KeyValue -and $KeyValue.Length -eq 24) {
-                    $Hex = [System.BitConverter]::ToString($KeyValue[7..0]) -replace "-",""
-                    $TimeUTC = Get-Date ([DateTime]::FromFileTimeUtc([Convert]::ToInt64($Hex, 16))) -Format "dd.MM.yy HH:mm"
-                    
-                    $SplitPath = Split-Path -Path $Item -Parent
-                    $PathParts = $SplitPath -split '\\'
-                    if ($PathParts.Count -ge 3 -and $PathParts[2] -match '^\d{1}$') {
-                        $path = Join-Path -Path "C:" -ChildPath $Item.Remove(1,23)
-                        $sig = Get-Signature -FilePath $path
-                        $app = Split-Path -Leaf $Item.TrimStart()
-                    } else {
-                        $path = ""
-                        $sig = "N/A"
-                        $app = $Item
-                    }
-                    
-                    $Bam += [PSCustomObject]@{
-                        'Time' = $TimeUTC
-                        'Application' = $app
-                        'Signature' = $sig
-                        'Path' = $path
-                        'SortDate' = [DateTime]::FromFileTimeUtc([Convert]::ToInt64($Hex, 16))
-                    }
-                }
+        $keyPath = Join-Path $rp "UserSettings\$Sid"
+        $BamItems = Get-ItemProperty -Path $keyPath | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name
+
+        foreach ($Item in $BamItems) {
+            $keyValue = (Get-ItemProperty -Path $keyPath).$Item
+            $utcTime = Convert-FileTimeToUTC -bytes $keyValue
+            if (-not $utcTime) { continue }
+
+            if (($Item -match '\d{1}') -and ($Item.Length -gt 23)) {
+                $filePath = Join-Path "C:" ($Item.Substring(24))
+                $sig = Get-Signature -FilePath $filePath
+                $app = Split-Path $filePath -Leaf
+            } else {
+                $filePath = ""
+                $sig = "N/A"
+                $app = $Item
+            }
+
+            [PSCustomObject]@{
+                Time        = $utcTime.ToString("dd.MM.yy HH:mm")
+                Application = $app
+                Signature   = $sig
+                Path        = $filePath
+                SortDate    = $utcTime
             }
         }
     }
 }
 
-$FilteredBam = $Bam | Where-Object { $_.Signature -in @("Invalid Signature (NotSigned)", "File Was Not Found") } | Sort-Object SortDate -Descending
+$FilteredBam = $Bam | Where-Object { $_.Signature -in @("Invalid Signature (NotSigned)", "File Was Not Found") } |
+                Sort-Object SortDate -Descending
 
 if ($FilteredBam) {
-    $FilteredBam | Select-Object 'Time', 'Application', 'Signature', 'Path' | Format-Table -AutoSize | Out-String -Width ([Console]::BufferWidth) | ForEach-Object {
-        $lines = $_ -split "`r?`n"
-        foreach ($line in $lines) {
-            if ($line -match "File Was Not Found") {
-                Write-Host $line -ForegroundColor Yellow
-            } elseif ($line -match "Invalid Signature") {
-                Write-Host $line -ForegroundColor Red
-            } else {
-                Write-Host $line
-            }
+    foreach ($entry in $FilteredBam) {
+        $color = switch ($entry.Signature) {
+            "File Was Not Found" { "Yellow" }
+            "Invalid Signature (NotSigned)" { "Red" }
+            default { "White" }
         }
+        Write-Host ("{0,-16} {1,-30} {2,-25} {3}" -f $entry.Time, $entry.Application, $entry.Signature, $entry.Path) -ForegroundColor $color
     }
 } else {
     Write-Host "No filtered entries found." -ForegroundColor Green
