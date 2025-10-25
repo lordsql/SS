@@ -60,25 +60,17 @@ function CustomCheck {
     $javaProcs = Get-Process -Name javaw -ErrorAction SilentlyContinue
     foreach ($proc in $javaProcs) {
         $pid = $proc.Id
-        Write-Host "Analyzing Minecraft PID: $pid" -ForegroundColor Cyan
-        $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$pid" -ErrorAction SilentlyContinue).CommandLine
-        if ($cmd -and $cmd.Contains("OgUwQPNl")) { $donkeyFound = $true }
-        if ($cmd -and $cmd.ToLower().Contains($childKeyPattern.ToLower())) { $ezInjectFound = $true }
+        Write-Host "Analyzing javaw PID: $pid" -ForegroundColor Cyan
         try {
+            $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$pid" -ErrorAction SilentlyContinue).CommandLine
+            if ($cmd -and $cmd.Contains("OgUwQPNl")) { $donkeyFound = $true }
+            if ($cmd -and $cmd.ToLower().Contains($childKeyPattern.ToLower())) { $ezInjectFound = $true }
+
             $output = (& $xxstringsPath -p $pid | Out-String) -split "`n"
             foreach ($line in $output) {
                 $l = $line.Trim()
                 if (-not $donkeyFound -and $l.Contains("OgUwQPNl")) { $donkeyFound = $true }
                 if (-not $ezInjectFound -and $l.ToLower().Contains($childKeyPattern.ToLower())) { $ezInjectFound = $true }
-            }
-        } catch { }
-        try {
-            $mods = (Get-Process -Id $pid -ErrorAction SilentlyContinue).Modules
-            if ($mods) {
-                foreach ($m in $mods) {
-                    $mn = $m.ModuleName
-                    if ($mn -and $mn.ToLower().Contains($childKeyPattern.ToLower())) { $ezInjectFound = $true }
-                }
             }
         } catch { }
     }
