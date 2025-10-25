@@ -2,23 +2,26 @@ $dps = @("CortexClient:::2023/11/11:12:57:00", "PhasmaClient:::2024/01/10:14:28:
 $pca = @("CortexClient:::0x16ed000","TroxillClient:::0x1b44000","PhasmaClient:::0x16a4000","VapeV4:::0xbcb000","VapeLite:::0x1709000","AmmitDLC:::0x3a23000","NobiumClient:::0x1c06000","NoRender:::0x82ed000","AvaloneClient:::0x19f2000","AvaloneGreen:::0x140b000","AvaloneBlue:::0x13f9000","BlessedClient:::0x2335000","AnapaV4:::0xe96000","DripLite:::0x192a000","TakkerProxy:::0x268f000","UsbCleaner:::0x2d3000","Hider:::0x16000","Blast3xStringRemover:::0x5c000","R-WipeCleaner:::0x112000","ResourceHacker:::0x61b000","RevoCleaner:::0xe79000","WiseFolderHider:::0xadf000","HideFolders:::0xe0c000","Nemezida:::0x2199000","OceanBypass:::0xe000","Hider2:::0x88000","WhiteGhostInt:::0x349f000","DpsChanger:::0x54000","StringCleaner:::0x76000","StubbornCleaner:::0x1bf2000","Vanish:::0x15e000","MicoHitBoxes:::0x18be000","MerzlotaCleaner:::0x50000","SizeChanger:::0x2b000","Unicorn:::0xa20000")
 
 $xxstringsPath = "$PSScriptRoot\xxstrings64.exe"
-Invoke-WebRequest -Uri "https://github.com/ZaikoARG/xxstrings/releases/download/1.0.0/xxstrings64.exe" -OutFile $xxstringsPath
+if (-not (Test-Path $xxstringsPath)) { Invoke-WebRequest -Uri "https://github.com/ZaikoARG/xxstrings/releases/download/1.0.0/xxstrings64.exe" -OutFile $xxstringsPath -UseBasicParsing }
 
 function Check-ServiceStrings {
     param ([string]$ServiceName, [array]$StringsList, [string]$Prefix)
     $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-    if (-not $service) { Write-Host "$Prefix service $ServiceName not found or disabled" -ForegroundColor Gray; return }
-    if ($service.Status -ne 'Running') { Write-Host "$Prefix service $ServiceName disabled" -ForegroundColor Gray; return }
-    $svcProcess = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
+    if (-not $service) { Write-Host "$Prefix Service $ServiceName not found or disabled" -ForegroundColor Gray; return }
+    if ($service.Status -ne 'Running') { Write-Host "$Prefix Service $ServiceName is not running" -ForegroundColor Gray; return }
+    $svcProcess = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" -ErrorAction SilentlyContinue
+    if (-not $svcProcess) { Write-Host "$Prefix Service $ServiceName info not available" -ForegroundColor Gray; return }
     $pid = $svcProcess.ProcessId
-    Write-Host "$Prefix service $ServiceName running. PID: $pid" -ForegroundColor Cyan
+    Write-Host "$Prefix Service $ServiceName PID: $pid" -ForegroundColor Cyan
     $output = (& $xxstringsPath -p $pid | Out-String) -split "`n"
     foreach ($line in $output) {
-        $line = $line.Trim()
-        if ($line -match '^\\device\\harddiskvolume((?!.*\.(exe|dll)).)*\..*$') { Write-Host "[$Prefix] Detected modified extension: $line" -ForegroundColor Yellow }
+        $l = $line.Trim()
         foreach ($entry in $StringsList) {
             $parts = $entry -split ":::"
-            if ($line.Contains($parts[1])) { $puk = ($line -split "!")[2]; Write-Host "[$Prefix] Detected $($parts[0]) ($puk)" -ForegroundColor Red }
+            if ($l.Contains($parts[1])) {
+                $token = ($l -split "!" | Select-Object -Last 1)
+                Write-Host "$Prefix Detected $($parts[0]) $token" -ForegroundColor Red
+            }
         }
     }
 }
@@ -32,26 +35,60 @@ function Check-ExplorerOrPCA {
     $output = (& $xxstringsPath -p $pid | Out-String) -split "`n"
     $seen = @{}
     foreach ($line in $output) {
-        $line = $line.Trim()
-        if ($line -match $Pattern) {
-            $path = $line -replace '^(file:///|\\\?\?)', '' -replace '%20',' '
+        $l = $line.Trim()
+        if ($l -match $Pattern) {
+            $path = $l -replace '^(file:///|\\\?\?)', '' -replace '%20',' '
             if (-not $seen.ContainsKey($path)) {
                 if (Test-Path $path) {
-                    $sig = (Get-AuthenticodeSignature $path).Status
-                    if ($sig -ne 'Valid') { Write-Host "[$Prefix] Detected .exe with invalid signature: $path" -ForegroundColor Yellow } else { Write-Host "[$Prefix] Valid signature: $path" -ForegroundColor Green }
-                } else { Write-Host "[$Prefix] Detected deleted .exe: $path" -ForegroundColor DarkYellow }
+                    $sig = (Get-AuthenticodeSignature $path -ErrorAction SilentlyContinue).Status
+                    if ($sig -ne 'Valid') { Write-Host "$Prefix Invalid signature: $path" -ForegroundColor Yellow } else { Write-Host "$Prefix Valid signature: $path" -ForegroundColor Green }
+                } else { Write-Host "$Prefix Deleted/NotFound: $path" -ForegroundColor DarkYellow }
                 $seen[$path] = $true
             }
-            foreach ($entry in $StringsList) { $parts = $entry -split ":::";
-                if ($line.Contains($parts[1])) { Write-Host "[$Prefix] Detected $($parts[0])" -ForegroundColor Red }
+            foreach ($entry in $StringsList) {
+                $parts = $entry -split ":::"
+                if ($l.Contains($parts[1])) { Write-Host "$Prefix Detected $($parts[0])" -ForegroundColor Red }
             }
         }
     }
 }
 
-Check-ServiceStrings -ServiceName "" -StringsList $dps -Prefix "DPS"
-Check-ServiceStrings -ServiceName "" -StringsList $dps -Prefix "DiagTrack"
-Check-ExplorerOrPCA -ProcessName "" -Prefix "Explorer" -Pattern "^file:///.+exe*$"
-Check-ExplorerOrPCA -ProcessName "" -Prefix "PCA" -Pattern "^\\\?\?\\.+\.exe*$" -StringsList $pca
+function CustomCheck {
+    $donkeyFound = $false
+    $ezInjectFound = $false
+    $childKeyPattern = "childKey"
+    $javaProcs = Get-Process -Name javaw -ErrorAction SilentlyContinue
+    foreach ($proc in $javaProcs) {
+        $pid = $proc.Id
+        Write-Host "Analyzing Minecraft PID: $pid" -ForegroundColor Cyan
+        $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$pid" -ErrorAction SilentlyContinue).CommandLine
+        if ($cmd -and $cmd.Contains("OgUwQPNl")) { $donkeyFound = $true }
+        if ($cmd -and $cmd.ToLower().Contains($childKeyPattern.ToLower())) { $ezInjectFound = $true }
+        try {
+            $output = (& $xxstringsPath -p $pid | Out-String) -split "`n"
+            foreach ($line in $output) {
+                $l = $line.Trim()
+                if (-not $donkeyFound -and $l.Contains("OgUwQPNl")) { $donkeyFound = $true }
+                if (-not $ezInjectFound -and $l.ToLower().Contains($childKeyPattern.ToLower())) { $ezInjectFound = $true }
+            }
+        } catch { }
+        try {
+            $mods = (Get-Process -Id $pid -ErrorAction SilentlyContinue).Modules
+            if ($mods) {
+                foreach ($m in $mods) {
+                    $mn = $m.ModuleName
+                    if ($mn -and $mn.ToLower().Contains($childKeyPattern.ToLower())) { $ezInjectFound = $true }
+                }
+            }
+        } catch { }
+    }
+    Write-Host "Donkey: $(if($donkeyFound){"Yes"}else{"No"})" -ForegroundColor Cyan
+    Write-Host "EzInject: $(if($ezInjectFound){"Yes"}else{"No"})" -ForegroundColor Cyan
+}
 
-Remove-Item -Path $xxstringsPath -Force
+Check-ServiceStrings -ServiceName "DPS" -StringsList $dps -Prefix "DPS"
+Check-ServiceStrings -ServiceName "DiagTrack" -StringsList $dps -Prefix "DiagTrack"
+Check-ExplorerOrPCA -ProcessName "explorer" -Prefix "Explorer" -Pattern "^file:///.+exe*$"
+Check-ExplorerOrPCA -ProcessName "PcaSvc" -Prefix "PCA" -Pattern "^\\\?\?\\.+\.exe*$" -StringsList $pca
+CustomCheck
+Remove-Item -Path $xxstringsPath -Force -ErrorAction SilentlyContinue
