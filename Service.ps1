@@ -49,9 +49,9 @@ function Check-ExplorerOrPCA {
     }
 }
 
-Check-ServiceStrings -ServiceName "DPS" -StringsList $dps -Prefix "DPS"
-Check-ServiceStrings -ServiceName "DiagTrack" -StringsList $dps -Prefix "DiagTrack"
-Check-ExplorerOrPCA -ProcessName "explorer" -Prefix "Explorer" -Pattern "^file:///.+exe*$"
-Check-ExplorerOrPCA -ProcessName "PcaSvc" -Prefix "PCA" -Pattern "^\\\?\?\\.+\.exe*$" -StringsList $pca
+Check-ServiceStrings -ServiceName "" -StringsList $dps -Prefix "DPS"
+Check-ServiceStrings -ServiceName "" -StringsList $dps -Prefix "DiagTrack"
+Check-ExplorerOrPCA -ProcessName "" -Prefix "Explorer" -Pattern "^file:///.+exe*$"
+Check-ExplorerOrPCA -ProcessName "" -Prefix "PCA" -Pattern "^\\\?\?\\.+\.exe*$" -StringsList $pca
 
 Remove-Item -Path $xxstringsPath -Force
