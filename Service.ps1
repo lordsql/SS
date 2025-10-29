@@ -61,19 +61,25 @@ if (-not $procs) {
 } else {
     Write-Host "Minecraft" -ForegroundColor Magenta
     foreach ($proc in $procs) {
-        $pid = $proc.Id
+        $procId = $proc.Id
         $donkey = $false
         $nursultan = $false
         try {
-            $output = (& $xxstringsPath -p $pid | Out-String) -split "`n"
+            $output = (& $xxstringsPath -p $procId | Out-String) -split "`n"
             foreach ($line in $output) {
                 $l = $line.Trim()
-                if ($l -like "*OgUwQPNl*") { $donkey = $true }
-                if ($l -like "*childKey*") { $nursultan = $true }
+                if ($l -imatch "OgUwQPNl") { $donkey = $true }
+                if ($l -imatch "childKey") { $nursultan = $true }
             }
-        } catch { }
-        Write-Host ("  PID: {0} — Donkey: {1}; Nursultan: {2}" -f $pid, (if($donkey){'Yes'}else{'No'}), (if($nursultan){'Yes'}else{'No'}))
+        } catch {
+        }
+        $donkeyStr = if ($donkey) { 'Yes' } else { 'No' }
+        $nursultanStr = if ($nursultan) { 'Yes' } else { 'No' }
+        Write-Host ("  PID: {0} — Donkey: {1}; Nursultan: {2}" -f $procId, $donkeyStr, $nursultanStr)
     }
 }
+
+Remove-Item -Path $xxstringsPath -Force -ErrorAction SilentlyContinue
+
 
 Remove-Item -Path $xxstringsPath -Force -ErrorAction SilentlyContinue
