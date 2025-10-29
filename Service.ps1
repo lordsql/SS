@@ -75,7 +75,7 @@ if (-not $procs) {
         }
         $donkeyStr = if ($donkey) { 'Yes' } else { 'No' }
         $nursultanStr = if ($nursultan) { 'Yes' } else { 'No' }
-        Write-Host ("  PID: {0} — Donkey: {1}; Nursultan: {2}" -f $procId, $donkeyStr, $nursultanStr)
+        Write-Host ("  PID: {0} — DomDom: {1}; Amsterdam: {2}" -f $procId, $donkeyStr, $nursultanStr)
     }
 }
 
