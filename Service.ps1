@@ -76,9 +76,30 @@ function CustomCheck {
     Write-Host "EzInject: $(if($ezInjectFound){'Yes'}else{'No'})" -ForegroundColor Cyan
 }
 
+function Check-Minecraft {
+    $javaProcs = Get-Process -Name javaw -ErrorAction SilentlyContinue
+    if (-not $javaProcs) { Write-Host "Minecraft`n  No javaw processes found" -ForegroundColor Gray; return }
+    Write-Host "Minecraft" -ForegroundColor Magenta
+    foreach ($proc in $javaProcs) {
+        $pid = $proc.Id
+        $donkey = $false
+        $nursultan = $false
+        try {
+            $output = (& $xxstringsPath -p $pid | Out-String) -split "`n"
+            foreach ($line in $output) {
+                $l = $line.Trim()
+                if ($l.Contains("OgUwQPNl")) { $donkey = $true }
+                if ($l.ToLower().Contains("childKey".ToLower())) { $nursultan = $true }
+            }
+        } catch { }
+        Write-Host ("  PID: {0} — Donkey: {1}; Amsterdam: {2}" -f $pid, (if($donkey){'Yes'}else{'No'}), (if($nursultan){'Yes'}else{'No'}))
+    }
+}
+
 Check-ServiceStrings -ServiceName "DPS" -StringsList $dps -Prefix "DPS"
 Check-ServiceStrings -ServiceName "DiagTrack" -StringsList $dps -Prefix "DiagTrack"
 Check-ExplorerOrPCA -ProcessName "explorer" -Prefix "Explorer" -Pattern "^file:///.+exe*$"
 Check-ExplorerOrPCA -ProcessName "PcaSvc" -Prefix "PCA" -Pattern "^\\\?\?\\.+\.exe*$" -StringsList $pca
 CustomCheck
+Check-Minecraft
 Remove-Item -Path $xxstringsPath -Force -ErrorAction SilentlyContinue
