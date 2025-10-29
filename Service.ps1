@@ -54,21 +54,26 @@ Check-ServiceStrings -ServiceName "DPS" -StringsList $dps -Prefix "DPS"
 Check-ServiceStrings -ServiceName "DiagTrack" -StringsList $dps -Prefix "DiagTrack"
 Check-ExplorerOrPCA -ProcessName "explorer" -Prefix "Explorer" -Pattern "^file:///.+exe*$"
 Check-ExplorerOrPCA -ProcessName "PcaSvc" -Prefix "PCA" -Pattern "^\??\.+.exe*$" -StringsList $pca
+
 $procs = Get-Process -Name javaw -ErrorAction SilentlyContinue
-if (-not $procs) { Write-Host "Minecraft processes not found" -ForegroundColor Gray }
-else {
-foreach ($proc in $procs) {
-$pid = $proc.Id
-Write-Host "Minecraft process PID: $pid" -ForegroundColor Cyan
-& $xxstringsPath -p $pid | ForEach-Object {
-$l = $_.Trim()
-if ($l -like "OgUwQPNl") {
-Write-Host "Donkey" -ForegroundColor Yellow
+if (-not $procs) { 
+    Write-Host "Minecraft processes not found" -ForegroundColor Gray 
+} else {
+    Write-Host "Minecraft" -ForegroundColor Magenta
+    foreach ($proc in $procs) {
+        $pid = $proc.Id
+        $donkey = $false
+        $nursultan = $false
+        try {
+            $output = (& $xxstringsPath -p $pid | Out-String) -split "`n"
+            foreach ($line in $output) {
+                $l = $line.Trim()
+                if ($l -like "*OgUwQPNl*") { $donkey = $true }
+                if ($l -like "*childKey*") { $nursultan = $true }
+            }
+        } catch { }
+        Write-Host ("  PID: {0} — Donkey: {1}; Nursultan: {2}" -f $pid, (if($donkey){'Yes'}else{'No'}), (if($nursultan){'Yes'}else{'No'}))
+    }
 }
-if ($l -like "childKey") {
-Write-Host "Yes, Nursultan user" -ForegroundColor Red
-}
-}
-}
-}
+
 Remove-Item -Path $xxstringsPath -Force -ErrorAction SilentlyContinue
