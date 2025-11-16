@@ -11,22 +11,31 @@ if (-not $isAdmin) {
     exit
 }
 
-Write-Host "made by denischifer | funtime" -ForegroundColor Cyan
-Write-Host ""
+function Show-Section {
+    param([string]$Title)
+    Write-Host "`n╔═══════════════════════════════════════════════════════════════════╗" -ForegroundColor DarkCyan
+    Write-Host "║  $Title" -ForegroundColor Cyan -NoNewline
+    $padding = 67 - $Title.Length
+    Write-Host (" " * $padding + "║") -ForegroundColor DarkCyan
+    Write-Host "╚═══════════════════════════════════════════════════════════════════╝" -ForegroundColor DarkCyan
+}
 
+Write-Host "`n                      SYSTEM ANALYSIS TOOL" -ForegroundColor Cyan
+Write-Host "                   made by denischifer | funtime" -ForegroundColor DarkCyan
+
+Show-Section "SYSTEM INFORMATION"
 try {
     $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem
     $bootTime = $osInfo.LastBootUpTime
     $uptime = (Get-Date) - $bootTime
-    Write-Host "SYSTEM INFO" -ForegroundColor Cyan
     Write-Host ("  OS Version: {0}" -f $osInfo.Caption) -ForegroundColor White
     Write-Host ("  Last Boot: {0}" -f $bootTime.ToString("yyyy-MM-dd HH:mm:ss")) -ForegroundColor White
     Write-Host ("  Uptime: {0} days, {1:D2}:{2:D2}:{3:D2}" -f $uptime.Days, $uptime.Hours, $uptime.Minutes, $uptime.Seconds) -ForegroundColor White
 } catch { Write-Host "  Unable to retrieve boot time information" -ForegroundColor Red }
 
+Show-Section "CONNECTED DRIVES & USB HISTORY"
 $drives = Get-CimInstance -ClassName Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 }
 if ($drives) {
-    Write-Host "`nCONNECTED DRIVES" -ForegroundColor Cyan
     foreach ($drive in $drives) {
         $driveLabel = if ([string]::IsNullOrWhiteSpace($drive.VolumeName)) { "No Label" } else { $drive.VolumeName }
         $freeSpaceGB = [math]::Round($drive.FreeSpace / 1GB, 2)
@@ -35,7 +44,101 @@ if ($drives) {
     }
 }
 
-Write-Host "`nSERVICE STATUS" -ForegroundColor Cyan
+Write-Host "`n  USB DEVICE HISTORY:" -ForegroundColor White
+try {
+    $usbDevices = @()
+    $usbStorPath = "HKLM:\SYSTEM\CurrentControlSet\Enum\USBSTOR"
+    
+    if (Test-Path $usbStorPath) {
+        $deviceKeys = Get-ChildItem -Path $usbStorPath -ErrorAction SilentlyContinue
+        foreach ($deviceKey in $deviceKeys) {
+            $instances = Get-ChildItem -Path $deviceKey.PSPath -ErrorAction SilentlyContinue
+            foreach ($instance in $instances) {
+                $friendlyName = (Get-ItemProperty -Path $instance.PSPath -Name "FriendlyName" -ErrorAction SilentlyContinue).FriendlyName
+                $lastWrite = $instance.LastWriteTime
+                
+                if ($friendlyName) {
+                    $usbDevices += [PSCustomObject]@{
+                        Name = $friendlyName
+                        LastConnected = $lastWrite
+                    }
+                }
+            }
+        }
+    }
+    
+    if ($usbDevices.Count -gt 0) {
+        $usbDevices | Sort-Object LastConnected -Descending | Select-Object -First 10 | ForEach-Object {
+            Write-Host ("    Device: {0}" -f $_.Name) -ForegroundColor Gray
+            Write-Host ("      Last Connected: {0}" -f $_.LastConnected.ToString("yyyy-MM-dd HH:mm:ss")) -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "    No USB device history found." -ForegroundColor Green
+    }
+} catch {
+    Write-Host "    Unable to retrieve USB device history." -ForegroundColor Red
+}
+
+Show-Section "NETWORK INFORMATION"
+Write-Host "  Network Adapters Configuration:" -ForegroundColor White
+
+$adapters = Get-NetIPConfiguration -ErrorAction SilentlyContinue | Where-Object { $_.IPv4Address -ne $null }
+
+if ($adapters) {
+    foreach ($adapter in $adapters) {
+        Write-Host "`n    ═══ $($adapter.InterfaceAlias) ═══" -ForegroundColor Cyan
+        
+        $dnsConnectionSuffix = $adapter.DNSSuffix
+        if ($dnsConnectionSuffix) {
+            Write-Host ("      DNS Connection Suffix: {0}" -f $dnsConnectionSuffix) -ForegroundColor Gray
+        }
+        
+        if ($adapter.IPv4Address) {
+            foreach ($ipv4 in $adapter.IPv4Address) {
+                Write-Host ("      IPv4 Address: {0}" -f $ipv4.IPAddress) -ForegroundColor White
+                
+                $prefixLength = $ipv4.PrefixLength
+                $subnetMask = switch ($prefixLength) {
+                    24 { "255.255.255.0" }
+                    16 { "255.255.0.0" }
+                    8 { "255.0.0.0" }
+                    default { 
+                        $maskBits = ('1' * $prefixLength).PadRight(32, '0')
+                        $octets = @()
+                        for ($i = 0; $i -lt 32; $i += 8) {
+                            $octets += [Convert]::ToByte($maskBits.Substring($i, 8), 2)
+                        }
+                        $octets -join '.'
+                    }
+                }
+                Write-Host ("      Subnet Mask: {0}" -f $subnetMask) -ForegroundColor Gray
+            }
+        }
+        
+        if ($adapter.IPv4DefaultGateway) {
+            Write-Host ("      Default Gateway: {0}" -f ($adapter.IPv4DefaultGateway.NextHop -join ", ")) -ForegroundColor Gray
+        }
+        
+        $dnsServers = Get-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
+        if ($dnsServers -and $dnsServers.ServerAddresses) {
+            Write-Host ("      DNS Servers: {0}" -f ($dnsServers.ServerAddresses -join ", ")) -ForegroundColor Gray
+        }
+    }
+} else {
+    Write-Host "    No network adapters with IPv4 configuration found." -ForegroundColor Yellow
+}
+
+Write-Host "`n  Port 25565 TCP Connections:" -ForegroundColor White
+$netstatResult = netstat -an | Select-String "25565" | Select-String "TCP"
+if ($netstatResult) {
+    $netstatResult | ForEach-Object {
+        Write-Host ("    {0}" -f $_.Line.Trim()) -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "    No active connections on port 25565" -ForegroundColor Green
+}
+
+Show-Section "SERVICE STATUS"
 $services = @(
     @{Name = "SysMain"; DisplayName = "SysMain"}, @{Name = "PcaSvc"; DisplayName = "Program Compatibility Assistant Service"},
     @{Name = "DPS"; DisplayName = "Diagnostic Policy Service"}, @{Name = "EventLog"; DisplayName = "Windows Event Log"},
@@ -61,22 +164,42 @@ foreach ($svc in $services) {
     } else { Write-Host ("  {0,-12} {1,-40} {2}" -f $svc.Name, "Not Found", "N/A") -ForegroundColor Yellow }
 }
 
-Write-Host "`nSECURITY STATUS" -ForegroundColor Cyan
+Show-Section "SECURITY STATUS"
 try {
-    $avProducts = Get-CimInstance -Namespace "root/SecurityCenter2" -ClassName "AntiVirusProduct" -ErrorAction SilentlyContinue
-    if ($avProducts) {
-        foreach ($product in $avProducts) {
-            $state = "{0:X6}" -f $product.productState
-            $enabledStatus = if ($state.Substring(2, 2) -in @('10', '11')) { "Enabled" } else { "Disabled" }
-            $updateStatus = if ($state.Substring(4, 2) -eq '00') { "Up to date" } else { "Needs update" }
-            Write-Host ("  Antivirus: {0}" -f $product.displayName) -ForegroundColor White
-            Write-Host ("    Status: {0}" -f $enabledStatus) -ForegroundColor (if ($enabledStatus -eq 'Enabled') { 'Green' } else { 'Red' })
-            Write-Host ("    Definitions: {0}" -f $updateStatus) -ForegroundColor (if ($updateStatus -eq 'Up to date') { 'Green' } else { 'Yellow' })
+    $defenderStatus = Get-MpComputerStatus -ErrorAction SilentlyContinue
+    if ($defenderStatus) {
+        Write-Host "  Windows Defender:" -ForegroundColor White
+        $avEnabled = $defenderStatus.AntivirusEnabled
+        $rtEnabled = $defenderStatus.RealTimeProtectionEnabled
+        $avStatus = if ($avEnabled -and $rtEnabled) { "Enabled" } else { "Disabled" }
+        $avColor = if ($avEnabled -and $rtEnabled) { "Green" } else { "Red" }
+        
+        Write-Host ("    Status: {0}" -f $avStatus) -ForegroundColor $avColor
+        
+        $sigAge = (Get-Date) - $defenderStatus.AntivirusSignatureLastUpdated
+        $sigStatus = if ($sigAge.Days -eq 0) { "Up to date" } elseif ($sigAge.Days -eq 1) { "1 day old" } else { "$($sigAge.Days) days old" }
+        $sigColor = if ($sigAge.Days -le 1) { "Green" } else { "Yellow" }
+        Write-Host ("    Definitions: {0} (Updated: {1})" -f $sigStatus, $defenderStatus.AntivirusSignatureLastUpdated.ToString("yyyy-MM-dd HH:mm")) -ForegroundColor $sigColor
+    } else {
+        $avProducts = Get-CimInstance -Namespace "root/SecurityCenter2" -ClassName "AntiVirusProduct" -ErrorAction SilentlyContinue
+        if ($avProducts) {
+            foreach ($product in $avProducts) {
+                $state = "{0:X6}" -f $product.productState
+                $enabledStatus = if ($state.Substring(2, 2) -in @('10', '11')) { "Enabled" } else { "Disabled" }
+                $updateStatus = if ($state.Substring(4, 2) -eq '00') { "Up to date" } else { "Needs update" }
+                Write-Host ("  Antivirus: {0}" -f $product.displayName) -ForegroundColor White
+                Write-Host ("    Status: {0}" -f $enabledStatus) -ForegroundColor (if ($enabledStatus -eq 'Enabled') { 'Green' } else { 'Red' })
+                Write-Host ("    Definitions: {0}" -f $updateStatus) -ForegroundColor (if ($updateStatus -eq 'Up to date') { 'Green' } else { 'Yellow' })
+            }
+        } else {
+            Write-Host "  No antivirus information available." -ForegroundColor Yellow
         }
-    } else { Write-Host "  No registered Antivirus product found in Security Center." -ForegroundColor Red }
-} catch { Write-Host "  Could not query Security Center (may not be available on this OS)." -ForegroundColor Yellow }
+    }
+} catch {
+    Write-Host "  Unable to retrieve antivirus status." -ForegroundColor Red
+}
 
-Write-Host "`nREGISTRY INFO" -ForegroundColor Cyan
+Show-Section "REGISTRY INFORMATION"
 $registrySettings = @(
     @{ Name = "CMD Access"; Path = "HKCU:\Software\Policies\Microsoft\Windows\System"; Key = "DisableCMD"; BadValue = 1; Good = "Available"; Bad = "Disabled" },
     @{ Name = "PowerShell Logging"; Path = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging"; Key = "EnableScriptBlockLogging"; GoodValue = 1; Good = "Enabled"; Bad = "Disabled" },
@@ -103,7 +226,7 @@ function Check-USNJournalState {
     } catch { Write-Host "  USN Journal State ($driveLetter): Unable to query" -ForegroundColor Yellow }
 }
 
-Write-Host "`nEVENT LOGS & ARTIFACTS" -ForegroundColor Cyan
+Show-Section "EVENT LOGS & ARTIFACTS"
 foreach ($drive in $drives) { Check-USNJournalState $drive.DeviceID }
 $usn_deletes = try { Get-WinEvent -FilterXml "<QueryList><Query Id='0' Path='Microsoft-Windows-Ntfs/Operational'><Select Path='Microsoft-Windows-Ntfs/Operational'>*[System[EventID=501]] and *[EventData[Data[@Name='ProcessName'] and (Data='fsutil.exe')]]</Select></Query></QueryList>" -MaxEvents 1 -ErrorAction Stop } catch { $null }
 if ($usn_deletes) {
@@ -116,7 +239,7 @@ $lastShutdown = Get-WinEvent -FilterHashtable @{LogName='System'; ID=1074} -MaxE
 if ($lastShutdown) { Write-Host "  Last Clean Shutdown Event at: " -NoNewline -ForegroundColor White; Write-Host $($lastShutdown.TimeCreated.ToString("MM/dd HH:mm")) -ForegroundColor Yellow } 
 else { Write-Host "  Last Clean Shutdown Event: Not found" -ForegroundColor Green }
 
-Write-Host "`nCOMMAND & SCRIPTING HISTORY" -ForegroundColor Cyan
+Show-Section "COMMAND & SCRIPTING HISTORY"
 Write-Host "  CONSOLE COMMAND HISTORY (PSReadline):" -ForegroundColor White
 try {
     $historyPath = (Get-PSReadlineOption).HistorySavePath
@@ -132,7 +255,7 @@ if ($lastScriptBlock) {
     Write-Host "    Last ScriptBlock log entry found at: " -NoNewline -ForegroundColor White; Write-Host $lastScriptBlock.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor Yellow
 } else { Write-Host "    No ScriptBlock log entries found." -ForegroundColor Green }
 
-Write-Host "`nPERSISTENCE MECHANISMS" -ForegroundColor Cyan
+Show-Section "PERSISTENCE MECHANISMS"
 Write-Host "  LOCAL USER ACCOUNTS:" -ForegroundColor White
 try {
     Get-LocalUser | ForEach-Object {
@@ -174,7 +297,7 @@ foreach ($key in $runKeys | Where-Object { Test-Path $_ }) {
 }
 if (-not $foundStartup) { Write-Host "    No startup entries found in common Run keys." -ForegroundColor Green }
 
-Write-Host "`nRECENTLY ACCESSED FILES (LNK)" -ForegroundColor Cyan
+Show-Section "RECENTLY ACCESSED FILES"
 try {
     $recentPath = "$env:APPDATA\Microsoft\Windows\Recent"
     $recentItems = Get-ChildItem -Path $recentPath -Filter *.lnk -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 10
@@ -187,7 +310,7 @@ try {
     } else { Write-Host "  No recent items found." -ForegroundColor Green }
 } catch { Write-Host "  Could not retrieve recent items." -ForegroundColor Red } finally { if ($shell) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null } }
 
-Write-Host "`nRECYCLE BIN" -ForegroundColor Cyan
+Show-Section "RECYCLE BIN"
 try {
     $anyFound = $false
     foreach ($drive in $drives) {
@@ -208,5 +331,7 @@ try {
     if (-not $anyFound) { Write-Host "  Recycle Bin folders not found on any drives." -ForegroundColor Green }
 } catch { Write-Host "  Recycle Bin: Unable to access. $_.Exception.Message" -ForegroundColor Red }
 
-
-Write-Host "`nComplete." -ForegroundColor Cyan
+Write-Host "`n╔═══════════════════════════════════════════════════════════════════╗" -ForegroundColor DarkCyan
+Write-Host "║                       ANALYSIS COMPLETE                           ║" -ForegroundColor Green
+Write-Host "╚═══════════════════════════════════════════════════════════════════╝" -ForegroundColor DarkCyan
+Write-Host ""
