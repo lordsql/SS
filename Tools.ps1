@@ -2,8 +2,19 @@
 [Console]::CursorVisible = $false
 $Host.UI.RawUI.WindowTitle = "SS Tools | FunTime 2025"
 
+$downloadPath = "C:\screenshare"
+
+Clear-Host
+Write-Host ""
+Write-Host "  [*] Initializing session..." -ForegroundColor Yellow
+New-Item -Path $downloadPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+Get-Service -Name "cbdhsvc_*" -ErrorAction SilentlyContinue | Restart-Service -Force -ErrorAction SilentlyContinue
+Clear-EventLog -LogName "Windows PowerShell" -ErrorAction SilentlyContinue
+Write-Host "  [+] Session initialized successfully. Loading..." -ForegroundColor Green
+Start-Sleep -Seconds 2
+
 $menuItems = @(
-    [PSCustomObject]@{ Name = 'InjGen'; Type = 'Cmd'; Command = 'curl -OL "https://github.com/NotRequiem/InjGen/releases/download/v2.0/InjGen.exe" && InjGen.exe && del InjGen.exe'; HasSide = $false }
+    [PSCustomObject]@{ Name = 'InjGen'; Type = 'Cmd'; Command = "curl -L -o `"$($downloadPath)\InjGen.exe`" `"https://github.com/NotRequiem/InjGen/releases/download/v2.0/InjGen.exe`" && `"$($downloadPath)\InjGen.exe`" && del `"$($downloadPath)\InjGen.exe`""; HasSide = $false }
     [PSCustomObject]@{ Name = 'Checker'; Type = 'PsCmd'; Command = 'Invoke-Expression (Invoke-RestMethod https://raw.githubusercontent.com/lordsql/SS/refs/heads/main/Check.ps1)'; HasSide = $false }
     [PSCustomObject]@{ Name = 'Everything'; Type = 'Download'; Command = 'https://github.com/lordsql/SS/releases/download/ft/Everything15.exe'; HasSide = $false }
     [PSCustomObject]@{ Name = 'JournalTrace'; Type = 'Download'; Command = 'https://github.com/spokwn/JournalTrace/releases/download/1.2/JournalTrace.exe'; HasSide = $true; SideName = 'Echo Journal'; SideType = 'Download'; SideCommand = 'https://github.com/lordsql/SS/releases/download/funtime/echo-journal.exe' }
@@ -13,7 +24,8 @@ $menuItems = @(
     [PSCustomObject]@{ Name = 'LastActivityView'; Type = 'Download'; Command = 'https://github.com/lordsql/SS/releases/download/funtime/LastActivityView.exe'; HasSide = $false }
     [PSCustomObject]@{ Name = 'USBDriveLog'; Type = 'Download'; Command = 'https://github.com/lordsql/SS/releases/download/funtime/USBDriveLog.exe'; HasSide = $false }
     [PSCustomObject]@{ Name = 'ModAnalyzer'; Type = 'PsCmd'; Command = 'Invoke-Expression (Invoke-RestMethod https://raw.githubusercontent.com/lordsql/SS/refs/heads/main/ModAnalyzer.ps1)'; HasSide = $false }
-    [PSCustomObject]@{ Name = 'BamParser'; Type = 'PsCmd'; Command = 'Invoke-Expression (Invoke-RestMethod https://raw.githubusercontent.com/lordsql/SS/refs/heads/main/BamParser.ps1)'; HasSide = $false }
+    [PSCustomObject]@{ Name = 'BamParser'; Type = 'PsCmd'; Command = 'Invoke-Expression (Invoke-RestMethod https://raw.githubusercontent.com/lordsql/SS/refs/heads/main/BamParser.ps1)'; HasSide = $true; SideName = 'BAMReveal'; SideType = 'Download'; SideCommand = 'https://github.com/Orbdiff/BAMReveal/releases/download/v1.0/BAMReveal.exe'}
+    [PSCustomObject]@{ Name = 'Clean & Exit'; Type = 'Clean'; Command = ''; HasSide = $false }
 )
 
 $selectedIndex = 0
@@ -57,6 +69,7 @@ function Write-Menu {
         Write-Host "  ║ " -NoNewline -ForegroundColor DarkCyan
         
         if ($i -eq $selectedIndex) {
+            $itemColor = if ($item.Type -eq 'Clean') { [System.ConsoleColor]::Red } else { [System.ConsoleColor]::Cyan }
             Write-Host "  " -NoNewline
             Write-Host "►" -NoNewline -ForegroundColor Magenta
             Write-Host " " -NoNewline
@@ -65,29 +78,30 @@ function Write-Menu {
                 if ($sideSelectedState[$i]) {
                     Write-Host "[$($item.Name)]" -NoNewline -ForegroundColor DarkGray
                     Write-Host " • " -NoNewline -ForegroundColor DarkMagenta
-                    Write-Host "[$($item.SideName)]" -NoNewline -ForegroundColor Cyan
+                    Write-Host "[$($item.SideName)]" -NoNewline -ForegroundColor $itemColor
                 } else {
-                    Write-Host "[$($item.Name)]" -NoNewline -ForegroundColor Cyan
+                    Write-Host "[$($item.Name)]" -NoNewline -ForegroundColor $itemColor
                     Write-Host " • " -NoNewline -ForegroundColor DarkMagenta
                     Write-Host "[$($item.SideName)]" -NoNewline -ForegroundColor DarkGray
                 }
             } else {
-                Write-Host "[$($item.Name)]" -NoNewline -ForegroundColor Cyan
+                Write-Host "[$($item.Name)]" -NoNewline -ForegroundColor $itemColor
             }
             
             $textLength = $item.Name.Length + 6
             if ($item.HasSide) { $textLength += $item.SideName.Length + 6 }
             Write-Host (" " * ($width - 8 - $textLength)) -NoNewline
         } else {
+             $itemColor = if ($item.Type -eq 'Clean') { [System.ConsoleColor]::DarkRed } else { [System.ConsoleColor]::Gray }
             Write-Host "    " -NoNewline
             
             if ($item.HasSide) {
-                Write-Host $item.Name -NoNewline -ForegroundColor Gray
+                Write-Host $item.Name -NoNewline -ForegroundColor $itemColor
                 Write-Host " • " -NoNewline -ForegroundColor DarkGray
-                Write-Host $item.SideName -NoNewline -ForegroundColor Gray
+                Write-Host $item.SideName -NoNewline -ForegroundColor $itemColor
                 $textLength = $item.Name.Length + $item.SideName.Length + 7
             } else {
-                Write-Host $item.Name -NoNewline -ForegroundColor Gray
+                Write-Host $item.Name -NoNewline -ForegroundColor $itemColor
                 $textLength = $item.Name.Length + 4
             }
             Write-Host (" " * ($width - 8 - $textLength)) -NoNewline
@@ -168,13 +182,14 @@ function Download-File {
     
     try {
         $fileName = [System.IO.Path]::GetFileName($url)
+        $destinationPath = Join-Path -Path $downloadPath -ChildPath $fileName
         
         $response = Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing
         $totalSize = [int]$response.Headers["Content-Length"]
         
         $webClient = New-Object System.Net.WebClient
         $stream = $webClient.OpenRead($url)
-        $fileStream = [System.IO.File]::Create($fileName)
+        $fileStream = [System.IO.File]::Create($destinationPath)
         
         $buffer = New-Object byte[] 8192
         $totalRead = 0
@@ -224,7 +239,7 @@ function Download-File {
         Write-Host ("═" * 56) -NoNewline -ForegroundColor DarkGreen
         Write-Host "╝" -ForegroundColor DarkGreen
         
-        if ($fileName -like "*.exe") {
+        if ($destinationPath -like "*.exe") {
             Start-Sleep -Milliseconds 500
             
             [Console]::SetCursorPosition(0, $cursorTop + 1)
@@ -237,7 +252,7 @@ function Download-File {
             Write-Host (" " * (56 - $fileName.Length - 26)) -NoNewline
             Write-Host "║" -ForegroundColor DarkGreen
             
-            Start-Process -FilePath $fileName
+            Start-Process -FilePath $destinationPath
         }
         
         Start-Sleep -Seconds 2
@@ -272,6 +287,97 @@ function Download-File {
         
         Start-Sleep -Seconds 3
     }
+}
+
+function Clean-And-Exit {
+    Clear-Host
+    $width = 60
+    Write-Host "`n"
+    Write-Host ("  ╔" + "═" * ($width - 4) + "╗") -ForegroundColor DarkRed
+    $cleanTitle = "Clean & Exit Sequence"
+    $titlePadding = [math]::Floor(($width - 4 - $cleanTitle.Length) / 2)
+    Write-Host "  ║" -NoNewline -ForegroundColor DarkRed
+    Write-Host (" " * $titlePadding) -NoNewline
+    Write-Host $cleanTitle -ForegroundColor Red
+    Write-Host (" " * ($width - 4 - $titlePadding - $cleanTitle.Length)) -NoNewline
+    Write-Host "║" -ForegroundColor DarkRed
+    Write-Host ("  ╠" + "═" * ($width - 4) + "╣") -ForegroundColor DarkRed
+    
+    function Write-Clean-Status {
+        param([string]$Message, [bool]$Success)
+        Write-Host "  ║ " -NoNewline -ForegroundColor DarkRed
+        if ($Success) {
+            Write-Host "✓ " -ForegroundColor Green
+        } else {
+            Write-Host "✗ " -ForegroundColor Red
+        }
+        Write-Host $Message -NoNewline -ForegroundColor White
+        $padding = $width - 8 - $Message.Length
+        Write-Host (" " * $padding) -NoNewline
+        Write-Host "║" -ForegroundColor DarkRed
+    }
+
+    $processesToKill = @(
+        'Everything', 'JournalTrace', 'echo-journal', 'WinPrefetchView', 
+        'PrefetchView++', 'SystemInformer', 'ShellBagsView', 
+        'shellbag_analyzer_cleaner', 'LastActivityView', 'USBDriveLog', 
+        'InjGen', 'BAMReveal'
+    )
+    
+    Start-Sleep -Milliseconds 500
+    Write-Host "  ║" -NoNewline -ForegroundColor DarkRed; Write-Host (" " * ($width - 4)) -NoNewline; Write-Host "║" -ForegroundColor DarkRed
+    $allStopped = $true
+    foreach ($procName in $processesToKill) {
+        $processes = Get-Process -Name $procName -ErrorAction SilentlyContinue
+        if ($processes) {
+            Stop-Process -Name $procName -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 100
+            if ((Get-Process -Name $procName -ErrorAction SilentlyContinue)) {
+                $allStopped = $false
+            }
+        }
+    }
+    Write-Clean-Status -Message "Terminated running tool processes." -Success $allStopped
+    Write-Host "  ║" -NoNewline -ForegroundColor DarkRed; Write-Host (" " * ($width - 4)) -NoNewline; Write-Host "║" -ForegroundColor DarkRed
+    Start-Sleep -Milliseconds 500
+    
+    try {
+        Get-Service -Name "cbdhsvc_*" | Restart-Service -Force -ErrorAction Stop
+        Write-Clean-Status -Message "Clipboard User Service restarted." -Success $true
+    } catch {
+        Write-Clean-Status -Message "Clipboard Service could not be restarted." -Success $false
+    }
+    Write-Host "  ║" -NoNewline -ForegroundColor DarkRed; Write-Host (" " * ($width - 4)) -NoNewline; Write-Host "║" -ForegroundColor DarkRed
+    Start-Sleep -Milliseconds 500
+    
+    try {
+        Clear-EventLog -LogName "Windows PowerShell" -ErrorAction Stop
+        Write-Clean-Status -Message "Windows PowerShell event log cleared." -Success $true
+    } catch {
+        Write-Clean-Status -Message "Failed to clear PowerShell event log." -Success $false
+    }
+    Write-Host "  ║" -NoNewline -ForegroundColor DarkRed; Write-Host (" " * ($width - 4)) -NoNewline; Write-Host "║" -ForegroundColor DarkRed
+    Start-Sleep -Milliseconds 500
+
+    if (Test-Path $downloadPath) {
+        try {
+            Remove-Item -Path $downloadPath -Recurse -Force -ErrorAction Stop
+            Write-Clean-Status -Message "Removed working directory: $downloadPath" -Success $true
+        } catch {
+            Write-Clean-Status -Message "Failed to remove directory: $downloadPath" -Success $false
+        }
+    } else {
+        Write-Clean-Status -Message "Working directory not found, nothing to remove." -Success $true
+    }
+    Write-Host "  ║" -NoNewline -ForegroundColor DarkRed; Write-Host (" " * ($width - 4)) -NoNewline; Write-Host "║" -ForegroundColor DarkRed
+    Start-Sleep -Milliseconds 500
+
+    Write-Host ("  ╚" + "═" * ($width - 4) + "╝") -ForegroundColor DarkRed
+    Write-Host "`n  Cleanup complete. Exiting in 3 seconds..." -ForegroundColor DarkYellow
+    Start-Sleep -Seconds 3
+    [Console]::CursorVisible = $true
+    Clear-Host
+    exit
 }
 
 while ($true) {
@@ -312,6 +418,9 @@ while ($true) {
                 }
                 'Download' {
                     Download-File -url $command
+                }
+                'Clean' {
+                    Clean-And-Exit
                 }
             }
         }
